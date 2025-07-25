@@ -1,3 +1,5 @@
+from matplotlib import pyplot as plt
+
 from utils import (
     load_train_csv,
     load_valid_csv,
@@ -28,6 +30,10 @@ def neg_log_likelihood(data, theta, beta):
     # Implement the function as described in the docstring.             #
     #####################################################################
     log_lklihood = 0.0
+    for i, q in enumerate(data["question_id"]):
+        u = data["user_id"][i]
+        x = theta[u] - beta[q]
+        log_lklihood += data["is_correct"][i] * x - np.log(1 + np.exp(x))
     #####################################################################
     #                       END OF YOUR CODE                            #
     #####################################################################
@@ -55,7 +61,12 @@ def update_theta_beta(data, lr, theta, beta):
     # TODO:                                                             #
     # Implement the function as described in the docstring.             #
     #####################################################################
-    pass
+    for i, q in enumerate(data["question_id"]):
+        u = data["user_id"][i]
+        x = theta[u] - beta[q]
+        p_a = sigmoid(x)
+        theta[u] += lr * (data["is_correct"][i] - p_a)
+        beta[q] -= lr * (data["is_correct"][i] - p_a)
     #####################################################################
     #                       END OF YOUR CODE                            #
     #####################################################################
@@ -75,21 +86,31 @@ def irt(data, val_data, lr, iterations):
     :param iterations: int
     :return: (theta, beta, val_acc_lst)
     """
-    # TODO: Initialize theta and beta.
-    theta = None
-    beta = None
+    # Initialize theta and beta using the maximum values from both training and validation data
+    max_user = max(max(data["user_id"]), max(val_data["user_id"])) + 1
+    max_question = max(max(data["question_id"]), max(val_data["question_id"])) + 1
+    
+    theta = np.random.normal(size=max_user)
+    beta = np.random.normal(size=max_question)
 
     val_acc_lst = []
+    val_log_lst = []
+    trn_log_lst = []
 
     for i in range(iterations):
         neg_lld = neg_log_likelihood(data, theta=theta, beta=beta)
+        trn_log_lst.append(-neg_lld)
+
         score = evaluate(data=val_data, theta=theta, beta=beta)
         val_acc_lst.append(score)
+
+        val_neg_lld = neg_log_likelihood(val_data, theta=theta, beta=beta)
+        val_log_lst.append(-val_neg_lld)
+
         print("NLLK: {} \t Score: {}".format(neg_lld, score))
         theta, beta = update_theta_beta(data, lr, theta, beta)
 
-    # TODO: You may change the return values to achieve what you want.
-    return theta, beta, val_acc_lst
+    return theta, beta, val_acc_lst, val_log_lst, trn_log_lst
 
 
 def evaluate(data, theta, beta):
@@ -113,7 +134,7 @@ def evaluate(data, theta, beta):
 def main():
     train_data = load_train_csv("./data")
     # You may optionally use the sparse matrix.
-    # sparse_matrix = load_train_sparse("./data")
+    sparse_matrix = load_train_sparse("./data")
     val_data = load_valid_csv("./data")
     test_data = load_public_test_csv("./data")
 
@@ -122,6 +143,36 @@ def main():
     # Tune learning rate and number of iterations. With the implemented #
     # code, report the validation and test accuracy.                    #
     #####################################################################
+    bst_val_acc = 0.0
+    bst_lr = 0.0
+    bst_iter = 0
+
+    for lr in [0.001, 0.01, 0.1]:
+        for iterations in [50, 100, 200]:
+            theta, beta, val_acc_lst, val_log_lst, trn_log_lst = irt(
+                train_data, val_data, lr=lr, iterations=iterations
+            )
+            val_acc = val_acc_lst[-1]
+            if val_acc > bst_val_acc:
+                bst_val_acc = val_acc
+                bst_lr = lr
+                bst_iter = iterations
+
+    print("Best Learning Rate:", bst_lr)
+    print("Best Number of Iterations:", bst_iter)
+    print("Best Validation Accuracy:", bst_val_acc)
+    test_acc = evaluate(test_data, theta, beta)
+    print("Test Accuracy:", test_acc)
+
+    iterations = range(bst_iter)
+    plt.plot(iterations, trn_log_lst, label='Training Log-likelihood')
+    plt.plot(iterations, val_log_lst, label='Validation Log-likelihood')
+    plt.xlabel('# of Iterations')
+    plt.ylabel('Log-likelihood')
+    plt.title('Training & Validation Log-likelihood vs. Number of Iterations')
+    plt.legend()
+    plt.savefig("q2b.png")
+
     pass
     #####################################################################
     #                       END OF YOUR CODE                            #
@@ -129,9 +180,26 @@ def main():
 
     #####################################################################
     # TODO:                                                             #
-    # Implement part (d)                                                #
+    # Implement part (d)
+    questions = [100, 500, 1500]
+    plt.figure()
+
+    for question in questions:
+        abilities = np.linspace(-3, 3, 100)
+        probabilities = []
+        for theta in abilities:
+            p_correct = sigmoid(theta - beta[question])
+            probabilities.append(p_correct)
+        plt.plot(abilities, probabilities, label=f"Question {question}")
+
+    plt.title("Probability of Correct Response vs. Ability")
+    plt.xlabel("Ability in terms of theta")
+    plt.ylabel("Probability of Correct Response")
+    plt.legend()
+    plt.grid(True)
+    plt.savefig("q2d.png")
     #####################################################################
-    pass
+
     #####################################################################
     #                       END OF YOUR CODE                            #
     #####################################################################
