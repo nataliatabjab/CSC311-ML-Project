@@ -1,5 +1,7 @@
 from matplotlib import pyplot as plt
-
+from sklearn.decomposition import PCA
+from sklearn.cluster import KMeans
+import torch
 from utils import (
     load_train_csv,
     load_valid_csv,
@@ -112,6 +114,117 @@ def irt(data, val_data, lr, iterations):
 
     return theta, beta, val_acc_lst, val_log_lst, trn_log_lst
 
+# Helper function to evaluate algorithm extension in Part B
+def evaluate_2pl(data, theta, alpha, beta):
+    predictions = []
+    for i, q in enumerate(data["question_id"]):
+        predictions.append(sigmoid(alpha[q] * (theta[data["user_id"][i]] - beta[q])) >= 0.5)
+    return np.mean(data["is_correct"] == np.array(predictions))
+
+# Algorithm for Part B
+def irt_2pl(train_data, val_data, item_features, lr, iterations, n_components, tau):
+    max_question = max(max(train_data["question_id"]), max(val_data["question_id"])) + 1
+
+    # Cluster mean initialization
+    pca = PCA(n_components=n_components)
+    item_reduced = pca.fit_transform(item_features)
+    kmeans = KMeans(n_clusters=20, n_init=10, random_state=0)
+    clusters = kmeans.fit_predict(item_reduced)
+
+    # Initialization
+    theta, beta, _, _, _ = irt(train_data, val_data, 0.01, 50)
+    alpha = np.ones(max_question)
+    mu_alpha = np.array([np.mean(alpha[clusters == k]) for k in range(20)])
+    mu_beta = np.array([np.mean(beta[clusters == k]) for k in range(20)])
+
+    # Adam optimizer initialization
+    theta_a = torch.tensor(theta, dtype=torch.float32, requires_grad=True)
+    alpha_a = torch.tensor(alpha, dtype=torch.float32, requires_grad=True)
+    beta_a = torch.tensor(beta, dtype=torch.float32, requires_grad=True)
+    optimizer = torch.optim.Adam([theta_a, alpha_a, beta_a], lr=lr)
+
+    validation_acc, train_log_likelihood = [], []
+
+    for i in range(1, iterations + 1):
+        optimizer.zero_grad()
+        log_likelihood = torch.tensor(0.0, dtype=torch.float32)
+        # Update student abilities
+        for u, q, c in zip(train_data["user_id"], train_data["question_id"], train_data["is_correct"]):
+            p = torch.sigmoid(alpha_a[q] * (theta_a[u] - beta_a[q]))
+            log_likelihood += c * torch.log(p + 1e-5) + (1 - c) * torch.log(1 - p + 1e-5)
+
+         # Update item parameters
+        for q in range(max_question):
+            cluster = clusters[q]
+            log_likelihood -= ((alpha_a[q] - mu_alpha[cluster]) ** 2) / (2 * tau**2)
+            log_likelihood -= ((beta_a[q] - mu_beta[cluster]) ** 2) / (2 * tau**2)
+
+        (-log_likelihood).backward()
+        optimizer.step()
+
+        # Adam update for alpha
+        with torch.no_grad():
+            alpha_a.clamp_(0.1, 5.0)
+
+         # Adam update for beta 
+        alpha = alpha_a.detach().numpy()
+        beta = beta_a.detach().numpy()
+        theta = theta_a.detach().numpy()
+
+        # Recompute cluster means
+        for k in range(20):
+            if np.any(clusters == k):
+                mu_alpha[k] = np.mean(alpha[clusters == k])
+                mu_beta[k] = np.mean(beta[clusters == k])
+
+        train_log_likelihood.append(log_likelihood.item())
+        validation_acc.append(evaluate_2pl(val_data, theta, alpha, beta))
+
+        # To print validation accuracies: print("Iteration: ", i, "Validation accuracy:", validation_acc[-1])
+
+    return theta, alpha, beta, validation_acc, train_log_likelihood
+
+# Hypothesis testing for Part B question 3
+def run_experiment(train_data, val_data, test_data, item_features, lr, iterations):
+    results = {}
+    # Run experiment on all training data
+    theta_1pl, beta_1pl, validation_acc_1pl, _, _ = irt(train_data, val_data, lr, iterations)
+    test_accuracy_1pl = evaluate(test_data, theta_1pl, beta_1pl)
+    results["1PL_full"] = (validation_acc_1pl[-1], test_accuracy_1pl)
+
+    theta_2pl, alpha_2pl, beta_2pl, validation_acc_2pl, _ = irt_2pl(train_data, val_data, item_features, lr=lr, iterations=iterations, n_components=10, tau=0.1)
+    test_accuracy_2pl = evaluate_2pl(test_data, theta_2pl, alpha_2pl, beta_2pl)
+    results["2PL_full"] = (validation_acc_2pl[-1], test_accuracy_2pl)
+
+    # Run experiment on 50% of the trainin data
+    reduced_index = np.random.choice(len(train_data["user_id"]), size=len(train_data["user_id"]) // 2, replace=False)
+    reduced_train_data = {"user_id": np.array(train_data["user_id"])[reduced_index], "question_id": np.array(train_data["question_id"])[reduced_index],
+                          "is_correct": np.array(train_data["is_correct"])[reduced_index]}
+
+    theta_1pl_r, beta_1pl_r, validation_acc_1pl_r, _, _ = irt(reduced_train_data, val_data, lr, iterations)
+    test_accuracy_1pl_r = evaluate(test_data, theta_1pl_r, beta_1pl_r)
+    results["1PL_reduced"] = (validation_acc_1pl_r[-1], test_accuracy_1pl_r)
+
+    theta_2pl_r, alpha_2pl_r, beta_2pl_r, validation_acc_2pl_r, _ = irt_2pl(reduced_train_data, val_data, item_features, lr=lr, iterations=iterations, n_components=10, tau=0.1)
+    test_accuracy_2pl_r = evaluate_2pl(test_data, theta_2pl_r, alpha_2pl_r, beta_2pl_r)
+    results["2PL_reduced"] = (validation_acc_2pl_r[-1], test_accuracy_2pl_r)
+
+    # Plot graphs
+    plt.figure(figsize=(15, 10))
+    plt.bar(["1PL (Full)", "2PL (Full)", "1PL (Reduced)", "2PL (Reduced)"], [results["1PL_full"][0], results["2PL_full"][0],
+             results["1PL_reduced"][0], results["2PL_reduced"][0]], color=["blue", "orange", "blue", "orange"], alpha=0.7)
+    plt.ylabel("Validation Accuracy")
+    plt.title("Regularization Hypothesis Test")
+    plt.show()
+
+    plt.figure(figsize=(15, 10))
+    plt.bar(["1PL (Full)", "2PL (Full)", "1PL (Reduced)", "2PL (Reduced)"], [results["1PL_full"][1], results["2PL_full"][1],
+             results["1PL_reduced"][1], results["2PL_reduced"][1]], color=["blue", "orange", "blue", "orange"], alpha=0.7)
+    plt.ylabel("Test Accuracy")
+    plt.title("Regularization Hypothesis Test")
+    plt.show()
+
+    return results
 
 def evaluate(data, theta, beta):
     """Evaluate the model given data and return the accuracy.
@@ -204,6 +317,32 @@ def main():
     #                       END OF YOUR CODE                            #
     #####################################################################
 
+    ### Part B Question 3 ###
+    # theta_1pl, beta_1pl, validation_acc_1pl, _, _ = irt(train_data, val_data, lr=0.01, iterations=50)
+    # test_accuracy_1pl = evaluate(test_data, theta_1pl, beta_1pl)
+
+    # num_questions = max(max(train_data["question_id"]), max(val_data["question_id"])) + 1
+    # item_features = np.eye(num_questions) 
+    # theta_2pl, alpha_2pl, beta_2pl, validation_acc_2pl, _ = irt_2pl(train_data, val_data, item_features, lr=0.001, iterations=50, n_components=10, tau=0.1)
+    # test_accuracy_2pl = evaluate_2pl(test_data, theta_2pl, alpha_2pl, beta_2pl)
+
+    # models = ["1PL IRT", "2PL IRT"]
+    # val_accuracies = [validation_acc_1pl[-1], validation_acc_2pl[-1]]
+    # test_accuracies = [test_accuracy_1pl, test_accuracy_2pl]
+
+    # x = np.arange(len(models))
+    # plt.figure(figsize=(15, 10))
+    # plt.bar(x - 0.4/2, val_accuracies, 0.4, label="Validation Accuracy")
+    # plt.bar(x + 0.4/2, test_accuracies, 0.4, label="Test Accuracy")
+    # plt.xticks(x, models)
+    # plt.ylabel("Accuracy")
+    # plt.ylim(0, 1)
+    # plt.title("Comparing 1PL IRT and 2PL IRT")
+    # plt.legend()
+    # plt.show()
+
+    # # Run experiment
+    # results = run_experiment(train_data, val_data, test_data, item_features, 0.001, 50)
 
 if __name__ == "__main__":
     main()
