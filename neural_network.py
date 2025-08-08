@@ -95,7 +95,6 @@ def train(model, lr, lamb, train_data, zero_train_data, valid_data, num_epoch):
     :param num_epoch: int
     :return: None
     """
-    # TODO: Add a regularizer to the cost function.
 
     # Tell PyTorch you are training the model.
     model.train()
@@ -205,28 +204,28 @@ def main():
     best_trip  = None                   # (k, lr, epochs)
 
     # ------------------- grid search ------------------------------ #
-    # for k in k_vals:
-    #     for lr in lr_vals:
-    #         for epochs in epoch_vals:
-    #             model = AutoEncoder(train_matrix.shape[1], k)
+    for k in k_vals:
+        for lr in lr_vals:
+            for epochs in epoch_vals:
+                model = AutoEncoder(train_matrix.shape[1], k)
 
-    #             _, _ = train(
-    #                 model, lr, lamb,
-    #                 train_matrix,          # training tensor
-    #                 zero_train_matrix,     # zero-filled tensor
-    #                 valid_data,
-    #                 epochs
-    #             )
-    #             val_acc = evaluate(model, zero_train_matrix, valid_data)
+                _, _ = train(
+                    model, lr, lamb,
+                    train_matrix,          # training tensor
+                    zero_train_matrix,     # zero-filled tensor
+                    valid_data,
+                    epochs
+                )
+                val_acc = evaluate(model, zero_train_matrix, valid_data)
 
-    #             print(f"[k={k:3d}, lr={lr:.3g}, ep={epochs:3d}]  "
-    #                   f"val_acc = {val_acc:.4f}")
+                print(f"[k={k:3d}, lr={lr:.3g}, ep={epochs:3d}]  "
+                      f"val_acc = {val_acc:.4f}")
 
-    #             if val_acc > best_score:
-    #                 best_score = val_acc
-    #                 best_trip  = (k, lr, epochs)
+                if val_acc > best_score:
+                    best_score = val_acc
+                    best_trip  = (k, lr, epochs)
 
-    # k_star, lr_star, ep_star = best_trip
+    k_star, lr_star, ep_star = best_trip
 
     k_star = 50
     lr_star = 0.01
