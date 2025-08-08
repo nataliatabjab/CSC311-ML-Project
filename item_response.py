@@ -114,14 +114,14 @@ def irt(data, val_data, lr, iterations):
 
     return theta, beta, val_acc_lst, val_log_lst, trn_log_lst
 
-# Helper function to evaluate algorithm extension in Part B
+# Code for Part B: Helper function to evaluate algorithm extension 
 def evaluate_2pl(data, theta, alpha, beta):
     predictions = []
     for i, q in enumerate(data["question_id"]):
         predictions.append(sigmoid(alpha[q] * (theta[data["user_id"][i]] - beta[q])) >= 0.5)
     return np.mean(data["is_correct"] == np.array(predictions))
 
-# Algorithm for Part B
+# Code for Part B: Algorithm for Part B
 def irt_2pl(train_data, val_data, item_features, lr, iterations, n_components, tau):
     max_question = max(max(train_data["question_id"]), max(val_data["question_id"])) + 1
 
@@ -151,7 +151,7 @@ def irt_2pl(train_data, val_data, item_features, lr, iterations, n_components, t
         # Update student abilities
         for u, q, c in zip(train_data["user_id"], train_data["question_id"], train_data["is_correct"]):
             p = torch.sigmoid(alpha_a[q] * (theta_a[u] - beta_a[q]))
-            log_likelihood += c * torch.log(p + 1e-5) + (1 - c) * torch.log(1 - p + 1e-5)
+            log_likelihood += c * torch.log(p) + (1 - c) * torch.log(1 - p)
 
          # Update item parameters
         for q in range(max_question):
@@ -180,36 +180,39 @@ def irt_2pl(train_data, val_data, item_features, lr, iterations, n_components, t
         train_log_likelihood.append(log_likelihood.item())
         validation_acc.append(evaluate_2pl(val_data, theta, alpha, beta))
 
-        # To print validation accuracies: print("Iteration: ", i, "Validation accuracy:", validation_acc[-1])
-
     return theta, alpha, beta, validation_acc, train_log_likelihood
 
-# Hypothesis testing for Part B question 3
+# Code for Part B: Hypothesis testing for Part B question 3
 def run_experiment(train_data, val_data, test_data, item_features, lr, iterations):
     results = {}
+
     # Run experiment on all training data
+    # Run irt 1pl
     theta_1pl, beta_1pl, validation_acc_1pl, _, _ = irt(train_data, val_data, lr, iterations)
     test_accuracy_1pl = evaluate(test_data, theta_1pl, beta_1pl)
     results["1PL_full"] = (validation_acc_1pl[-1], test_accuracy_1pl)
 
+    # Run irt 2pl
     theta_2pl, alpha_2pl, beta_2pl, validation_acc_2pl, _ = irt_2pl(train_data, val_data, item_features, lr=lr, iterations=iterations, n_components=10, tau=0.1)
     test_accuracy_2pl = evaluate_2pl(test_data, theta_2pl, alpha_2pl, beta_2pl)
     results["2PL_full"] = (validation_acc_2pl[-1], test_accuracy_2pl)
 
-    # Run experiment on 50% of the trainin data
+    # Run experiment on 50% of the training data
     reduced_index = np.random.choice(len(train_data["user_id"]), size=len(train_data["user_id"]) // 2, replace=False)
     reduced_train_data = {"user_id": np.array(train_data["user_id"])[reduced_index], "question_id": np.array(train_data["question_id"])[reduced_index],
                           "is_correct": np.array(train_data["is_correct"])[reduced_index]}
 
+    # Run irt 1pl
     theta_1pl_r, beta_1pl_r, validation_acc_1pl_r, _, _ = irt(reduced_train_data, val_data, lr, iterations)
     test_accuracy_1pl_r = evaluate(test_data, theta_1pl_r, beta_1pl_r)
     results["1PL_reduced"] = (validation_acc_1pl_r[-1], test_accuracy_1pl_r)
 
+    # Run irt 2pl
     theta_2pl_r, alpha_2pl_r, beta_2pl_r, validation_acc_2pl_r, _ = irt_2pl(reduced_train_data, val_data, item_features, lr=lr, iterations=iterations, n_components=10, tau=0.1)
     test_accuracy_2pl_r = evaluate_2pl(test_data, theta_2pl_r, alpha_2pl_r, beta_2pl_r)
     results["2PL_reduced"] = (validation_acc_2pl_r[-1], test_accuracy_2pl_r)
 
-    # Plot graphs
+    # Plot graph for validation accuracy
     plt.figure(figsize=(15, 10))
     plt.bar(["1PL (Full)", "2PL (Full)", "1PL (Reduced)", "2PL (Reduced)"], [results["1PL_full"][0], results["2PL_full"][0],
              results["1PL_reduced"][0], results["2PL_reduced"][0]], color=["blue", "orange", "blue", "orange"], alpha=0.7)
@@ -217,6 +220,7 @@ def run_experiment(train_data, val_data, test_data, item_features, lr, iteration
     plt.title("Regularization Hypothesis Test")
     plt.show()
 
+    # Plot graph for test accuracy
     plt.figure(figsize=(15, 10))
     plt.bar(["1PL (Full)", "2PL (Full)", "1PL (Reduced)", "2PL (Reduced)"], [results["1PL_full"][1], results["2PL_full"][1],
              results["1PL_reduced"][1], results["2PL_reduced"][1]], color=["blue", "orange", "blue", "orange"], alpha=0.7)
@@ -318,6 +322,8 @@ def main():
     #####################################################################
 
     ### Part B Question 3 ###
+    ### Uncomment to run irt 2pl and the experiment ###
+    
     # theta_1pl, beta_1pl, validation_acc_1pl, _, _ = irt(train_data, val_data, lr=0.01, iterations=50)
     # test_accuracy_1pl = evaluate(test_data, theta_1pl, beta_1pl)
 
